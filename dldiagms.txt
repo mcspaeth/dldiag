@@ -1,0 +1,154 @@
+Simple Dragon's Lair Diagnostics
+@2019 Mark Spaeth -- mspaeth@gmail.com
+v.2019.01.10
+
+
+These are simple simple diagnostics to help diagnose problems with a
+(Cinematronics) Dragon's Lair or Space ACE PCB.  The diagnostic ROM
+replaces ROM1 on a standard DL ROM board or can be padded out to fit
+in a 27256/512 for a combined ROM board.  Tests are selected using the
+A bank of dip switches -- currently only 0-9, e, and f are implemented 
+although the code supports up to 64 tests.  The code requires basic
+functionality of the AY-3-8910 to read DIP switches, and a working 
+scoreboard/interface to display the results.
+
+Always start with test '0' first.  This is the RAM test, and all other
+tests require working RAM to run.  This test performs 16 cycles of a
+comprehensive 'random' byte write/read test of the 6116 RAM.  If this
+test passes. the P1 score will be filled with Ps.  If it fails the P1
+score will display '-HELP-'.  If youre score display is not working,
+you can probe the address lines to see what's going -- if the code is 
+spinning at $0071, the test failed, and if it's at $032E the test passed.
+Probing A8 on the CPU with an oscilloscope will show which state you're in.
+
+Once the RAM is good the other tests can be selected.  For all of the other
+tests, the test number is displayed in the credits, and a string of dashes
+is written then erased from the P1 score display.  If the displayed test
+number is wrong, you may have an issue with the AY-3-8910 or scoreboard
+interface.  If the dashes do not get erased, the ~IRQ line on the PCB is
+not firing.
+
+
+The current list of tests is as follows:
+
+00 = RAM Test
+01 = LED common count up
+02 = LED scrolling count up
+03 = DIP-controlled LED test
+04 = U20 count up test
+05 = DIP-controlled U20 test
+06 = U8 count up test
+07 = DIP-controlled U8 test
+08 = Display DIPS on P1 score
+09 = Display inputs on P1/P2 scores
+0e = Cycle through all address segments to test decode
+0f = AY-3-8910 oscillator + audio amp test
+
+
+Detailed test information:
+--------------------------
+
+$01: 
+Writes 0 sequentially to each LED location sequentially then counts each
+digit up.  The sequence is 0 to 9, -, E, H, L, P, _ then back to 0.
+
+$02:
+Writes the full hex sequences to the 16 LED digits and counts them up
+in sequence.
+
+$03:
+Uses the DIPs to let you write digits manually.
+The low 4 Bits of DSWB are the address of the digit (P2 100k = 0, P1 100k = 8)
+The high 4 bits of DSWB are the hex value to write.
+The value is written when DSWA:7 is turned on.
+
+$04:
+This tests u21 and u20 by counting up the value written to U21 and reading
+the value back on U20.  The value being written is sent in octal to the P1
+score, and the value read back is sent to the P2 score.  These values are
+xor'ed and stored and at the conclusion of the test, the failed bits are
+shown on the P2 score.  If this test fails, you may have issues with the 
+generation of signals outdiscdata, ~loaddiscdata, or ~rddisc data.
+
+$05:
+This is a more focused test of u21 and u20, that writes the value from DSWB
+to u21 and reads it back on u20.  Results are displayed as in test 04, but
+there's no 'end' since you're controlling what's written
+
+$06-07:
+These tests operate the same as 04-05, but read back through the control 
+inputs.  For these tests to work, you need a test harness from the 24-pin
+dip ribbon cable connector to the 36-pin molex as described at the end
+
+$08 = 10o
+Displays DSWA and DSWB in octal on the P1 display.
+Changing dip settings should change the displayed values
+
+$09 = 11o:
+Displays control and service inputs in octal on the P1 display.
+Displays LD read port in octal on the P2 display.
+D6 of the service inputs is driven by ENTER and will toggle if the jumper is in
+The other inputs can be tested by grounding pins on J4 and J2.
+
+$0e = 16o:
+Cycles through all decodeable address in sequence to check decoders.  The
+order is (with ~Y0 intermittent since the ROM is being accessed):
+
+~SELRAM
+(AY-3-8910 data read, affecting BC1 and BDIR)
+~CPA
+~CPB
+~RDDISCDAT
+DEN2
+DEN1
+~LDMISC
+(AY-3-8190 address write, affecting BC1 and BDIR)
+(AY-3-8190 data write, affecting BC1 and BDIR)
+
+...then loops.
+
+$0f = 17o:
+Tests the AY-3-8910 audio outputs (and the amps) by playing a sequence of 
+tones on the A, B, and C channels then cycling.
+
+
+
+
+Test harness wiring is the same as other diags for your convenience:
+J4 Pin	     	    J2 Pin
+------------------- ------------------- 
+ 1 = Right	     9 = D3
+ 5 = Left	    10 = D2
+ 9 = Down	    11 = D1
+13 = Up		    12 = D0
+17 = Aux3	    13 = D7
+21 = Aux2	    14 = D6
+25 = Aux1	    15 = D5
+29 = Sword	    16 = D4
+
+ 2 = P1		     2 = Enter (if jumpered)
+ 6 = P2		    17 = Int/Ext
+33 = Counter 	     6 = Ready (connect to 7 as well)
+33 = Counter	     1 = GND   (connect with a 4.7k resistor)
+
+Also connect J4 pins 16 and 24 if you want to test both amplifiers.
+
+
+
+Other notes:
+------------
+Since the scoreboard is in code-B mode, hex codes 0xa-0x0f don't produce hex
+digits, instead they produce -, E, H, L, P, <blank>.  Since the scoreboard
+can't ouput recognizable hex, this code uses octal notation instead.
+
+$ff = 1111 1111 = _11 111 111 = 377 octal
+$a5 = 1010 0101 = _10 100 101 = 245 octal
+
+Understanding octal will make identifying the displayed bits much easier.
+
+All data is displayed as it is read by the CPU.  For the I/Os, most signals
+have pull-up resistors, so with nothing connected $ff = 377o will be
+displayed.  Signals are activated by grounding them, and will show by bits
+in the octal code being cleared to 0.  Off DIP switches will appear as 1s,
+and on DIP switches will appear as 0s
+
